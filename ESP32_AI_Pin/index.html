@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Desk Camera</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .recording {
+            animation: pulse-ring 2s infinite;
+            background-color: #ef4444 !important;
+        }
+        .no-select {
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 font-sans flex items-center justify-center p-4">
+
+    <div class="bg-white rounded-3xl shadow-xl w-full max-w-5xl overflow-hidden flex flex-col h-[90vh]">
+        
+        <div class="bg-slate-900 text-white p-6 flex items-center justify-between flex-shrink-0">
+            <div class="flex items-center gap-3">
+                <i data-lucide="camera" class="w-6 h-6 text-blue-400"></i>
+                <h1 class="text-xl font-bold tracking-wide">Smart Desk Cam</h1>
+            </div>
+            <button id="settingsBtn" class="p-2 hover:bg-slate-800 rounded-full transition-colors">
+                <i data-lucide="settings" class="w-5 h-5 text-slate-300"></i>
+            </button>
+        </div>
+
+        <div id="settingsPanel" class="hidden bg-slate-50 p-6 border-b border-slate-200 space-y-4 flex-shrink-0">
+            <div>
+                <label class="block text-sm font-medium text-slate-600 mb-1">ESP32 Camera URL</label>
+                <input type="text" id="espUrl" value="http://192.168.1.100/capture" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600 mb-1">Backend Processing URL</label>
+                <input type="text" id="backendUrl" value="http://localhost:8000/process" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600 mb-1">Live Feed Framerate Target</label>
+                <select id="fpsSelect" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none text-sm">
+                    <option value="500">2 FPS (Stable)</option>
+                    <option value="200">5 FPS (Balanced)</option>
+                    <option value="100">10 FPS (Fast)</option>
+                    <option value="66" selected>15 FPS (Smooth)</option>
+                    <option value="33">30 FPS (Max Speed)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex flex-col md:flex-row flex-grow overflow-hidden">
+            
+            <div class="w-full md:w-1/2 p-6 border-b md:border-b-0 md:border-r border-slate-100 bg-slate-50/50 flex flex-col gap-6 overflow-y-auto">
+                
+                <div id="errorBanner" class="hidden w-full bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl flex items-start gap-3 flex-shrink-0">
+                    <i data-lucide="alert-circle" class="w-5 h-5 mt-0.5 flex-shrink-0"></i>
+                    <div class="text-sm" id="errorMessage">An error occurred.</div>
+                </div>
+
+                <div class="w-full aspect-video bg-slate-200 rounded-2xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center overflow-hidden relative flex-shrink-0 shadow-inner">
+                    
+                    <button id="liveToggleBtn" class="absolute top-2 right-2 z-20 bg-slate-900/70 hover:bg-slate-900 text-white text-xs px-3 py-1.5 rounded-lg flex items-center gap-2 backdrop-blur-sm transition-colors border border-white/10 shadow-sm">
+                        <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse hidden" id="liveDotIndicator"></span>
+                        <i data-lucide="video" class="w-4 h-4"></i>
+                        <span id="liveBtnText">Start Live View</span>
+                    </button>
+
+                    <img id="imagePreview" class="hidden w-full h-full object-cover absolute inset-0 z-10" alt="Desk Capture">
+                    <i id="placeholderIcon" data-lucide="image" class="w-12 h-12 text-slate-400 mb-2"></i>
+                    <p id="placeholderText" class="text-slate-500 text-sm font-medium">Camera Offline</p>
+                </div>
+
+                <div class="text-center px-4 hidden md:block">
+                    <h3 class="font-semibold text-slate-700">Camera View</h3>
+                    <p class="text-xs text-slate-500 mt-1">Make sure the items on your desk are clearly visible before interacting.</p>
+                </div>
+            </div>
+
+            <div class="w-full md:w-1/2 p-6 flex flex-col flex-grow overflow-y-auto scrollbar-hide space-y-6 bg-white relative">
+                
+                <div id="chatContainer" class="flex flex-col space-y-4 flex-grow w-full">
+                    <div class="flex justify-start">
+                        <div class="bg-slate-200 text-slate-800 px-4 py-3 rounded-2xl rounded-tl-sm max-w-[85%] shadow-sm text-sm">
+                            Hello! Turn on Live View, then hold the blue button below and ask me what's on your desk.
+                        </div>
+                    </div>
+                </div>
+
+                <div id="loadingBubble" class="hidden flex justify-start">
+                    <div class="bg-slate-100 border border-slate-200 text-slate-500 px-4 py-3 rounded-2xl rounded-tl-sm shadow-sm flex items-center gap-2">
+                        <div class="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></div>
+                        <div class="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+                        <div class="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 0.4s"></div>
+                    </div>
+                </div>
+                
+                <div class="flex-grow"></div>
+            </div>
+        </div>
+
+        <div class="p-6 bg-white border-t border-slate-100 flex flex-col items-center flex-shrink-0 relative z-20 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)]">
+            
+            <div class="text-center mb-4">
+                <span id="statusIndicator" class="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                    <span class="w-2 h-2 rounded-full bg-slate-400" id="statusDot"></span>
+                    <span id="statusText">Ready</span>
+                </span>
+            </div>
+
+            <button id="interactBtn" class="no-select relative w-24 h-24 rounded-full bg-blue-500 text-white shadow-lg hover:bg-blue-600 hover:shadow-xl transition-all duration-200 flex flex-col items-center justify-center gap-1 active:scale-95 touch-none">
+                <i data-lucide="mic" class="w-8 h-8 pointer-events-none"></i>
+                <span class="font-bold text-sm tracking-wider pointer-events-none">HOLD</span>
+            </button>
+            <p class="text-[10px] text-slate-400 mt-3 text-center uppercase tracking-wide">Press & Speak</p>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        const btn = document.getElementById('interactBtn');
+        const statusText = document.getElementById('statusText');
+        const statusDot = document.getElementById('statusDot');
+        const imagePreview = document.getElementById('imagePreview');
+        const placeholderIcon = document.getElementById('placeholderIcon');
+        const placeholderText = document.getElementById('placeholderText');
+        const errorBanner = document.getElementById('errorBanner');
+        const errorMessage = document.getElementById('errorMessage');
+        const chatContainer = document.getElementById('chatContainer');
+        const loadingBubble = document.getElementById('loadingBubble');
+        
+        const liveToggleBtn = document.getElementById('liveToggleBtn');
+        const liveDotIndicator = document.getElementById('liveDotIndicator');
+        const liveBtnText = document.getElementById('liveBtnText');
+        const fpsSelect = document.getElementById('fpsSelect');
+
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsPanel = document.getElementById('settingsPanel');
+        const espUrlInput = document.getElementById('espUrl');
+        const backendUrlInput = document.getElementById('backendUrl');
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+        let recordingTimeout;
+        let audioBlobPromiseResolver;
+        let audioBlobPromise;
+        let activeAudio = null;
+        
+        let latestImageBlob = null; 
+        let isLive = false;
+        let isFetchingFrame = false;
+
+        async function fetchSingleFrame() {
+            const espUrl = espUrlInput.value.trim();
+            const urlWithCacheBust = `${espUrl}?t=${Date.now()}`;
+            
+            const imgResponse = await fetch(urlWithCacheBust, { cache: "no-store" });
+            if (!imgResponse.ok) throw new Error(`ESP32 returned status ${imgResponse.status}`);
+            return await imgResponse.blob();
+        }
+
+        async function liveFeedLoop() {
+            if (!isLive) return;
+
+            if (!isFetchingFrame) {
+                isFetchingFrame = true;
+                try {
+                    const blob = await fetchSingleFrame();
+                    latestImageBlob = blob;
+
+                    const objectURL = URL.createObjectURL(blob);
+                    imagePreview.src = objectURL;
+                    imagePreview.classList.remove('hidden');
+                    placeholderIcon.classList.add('hidden');
+                    placeholderText.classList.add('hidden');
+                } catch (error) {
+                    console.error("Live feed frame dropped:", error);
+                }
+                isFetchingFrame = false;
+            }
+
+            if (isLive) {
+                const delayMs = parseInt(fpsSelect.value) || 200;
+                setTimeout(liveFeedLoop, delayMs);
+            }
+        }
+
+        function startLiveFeed() {
+            isLive = true;
+            liveDotIndicator.classList.remove('hidden');
+            liveBtnText.innerText = "Live";
+            liveToggleBtn.classList.replace('bg-slate-900/70', 'bg-red-900/80');
+            liveFeedLoop();
+        }
+
+        function stopLiveFeed() {
+            isLive = false;
+            liveDotIndicator.classList.add('hidden');
+            liveBtnText.innerText = "Start Live View";
+            liveToggleBtn.classList.replace('bg-red-900/80', 'bg-slate-900/70');
+        }
+
+        liveToggleBtn.addEventListener('click', () => {
+            if (isLive) stopLiveFeed();
+            else startLiveFeed();
+        });
+
+
+        settingsBtn.addEventListener('click', () => settingsPanel.classList.toggle('hidden'));
+
+        function addChatMessage(role, text) {
+            const wrapper = document.createElement('div');
+            wrapper.className = role === 'user' ? 'flex justify-end' : 'flex justify-start';
+            const bubble = document.createElement('div');
+            bubble.className = `px-4 py-3 shadow-sm text-sm max-w-[85%] ${
+                role === 'user' ? 'bg-blue-500 text-white rounded-2xl rounded-tr-sm' : 'bg-slate-200 text-slate-800 rounded-2xl rounded-tl-sm'
+            }`;
+            if (role === 'ai') {
+                bubble.innerHTML = `<div class="flex items-start gap-2"><i data-lucide="volume-2" class="w-4 h-4 mt-0.5 text-slate-500 flex-shrink-0"></i><span>${text}</span></div>`;
+            } else {
+                bubble.innerText = text;
+            }
+            wrapper.appendChild(bubble);
+            chatContainer.appendChild(wrapper);
+            lucide.createIcons();
+            chatContainer.parentElement.scrollTop = chatContainer.parentElement.scrollHeight;
+        }
+
+        function setStatus(state, message) {
+            statusText.innerText = message;
+            statusDot.className = 'w-2 h-2 rounded-full'; 
+            if (state === 'ready') {
+                statusDot.classList.add('bg-slate-400');
+                btn.classList.remove('recording', 'bg-slate-400', 'cursor-not-allowed');
+                btn.disabled = false;
+                loadingBubble.classList.add('hidden');
+            } else if (state === 'recording') {
+                statusDot.classList.add('bg-red-500');
+                btn.classList.add('recording');
+            } else if (state === 'processing') {
+                statusDot.classList.add('bg-blue-500', 'animate-pulse');
+                btn.classList.add('bg-slate-400', 'cursor-not-allowed');
+                btn.classList.remove('recording');
+                btn.disabled = true;
+                loadingBubble.classList.remove('hidden');
+                chatContainer.parentElement.scrollTop = chatContainer.parentElement.scrollHeight;
+            } else if (state === 'speaking') {
+                statusDot.classList.add('bg-green-500', 'animate-bounce');
+                btn.classList.add('bg-slate-400', 'cursor-not-allowed');
+                btn.disabled = true;
+                loadingBubble.classList.add('hidden');
+            }
+        }
+
+        function showError(msg) {
+            errorMessage.innerText = msg;
+            errorBanner.classList.remove('hidden');
+            setStatus('ready', 'Ready');
+            setTimeout(() => { errorBanner.classList.add('hidden'); }, 8000);
+        }
+
+        async function getAiCaptureFrame() {
+            if (isLive && latestImageBlob) {
+                return latestImageBlob; 
+            } else {
+                setStatus('processing', 'Snapping Photo...');
+                return await fetchSingleFrame();
+            }
+        }
+
+        async function startInteraction(e) {
+            if (e) e.preventDefault(); 
+            if (isRecording || btn.disabled) return;
+            errorBanner.classList.add('hidden');
+            if(activeAudio) { activeAudio.pause(); activeAudio = null; }
+
+            if (!isLive) {
+                fetchSingleFrame().then(blob => {
+                    latestImageBlob = blob; 
+                    const objectURL = URL.createObjectURL(blob);
+                    imagePreview.src = objectURL;
+                    imagePreview.classList.remove('hidden');
+                    placeholderIcon.classList.add('hidden');
+                    placeholderText.classList.add('hidden');
+                }).catch(err => console.error("Initial frame fetch failed", err));
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioChunks = [];
+                mediaRecorder = new MediaRecorder(stream);
+                audioBlobPromise = new Promise(resolve => audioBlobPromiseResolver = resolve);
+                mediaRecorder.ondataavailable = event => { if (event.data.size > 0) audioChunks.push(event.data); };
+                mediaRecorder.onstop = () => {
+                    audioBlobPromiseResolver(new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }));
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                mediaRecorder.start();
+                isRecording = true;
+                setStatus('recording', 'Listening...');
+                recordingTimeout = setTimeout(() => { if (isRecording) stopAndProcess(); }, 5000);
+            } catch (err) {
+                console.error(err);
+                showError("Microphone access denied.");
+            }
+        }
+
+        async function stopAndProcess(e) {
+            if (e) e.preventDefault();
+            if (!isRecording) return;
+            isRecording = false;
+            clearTimeout(recordingTimeout);
+            if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+
+            setStatus('processing', 'Processing...');
+            
+            try {
+                const targetImageBlob = latestImageBlob ? latestImageBlob : await getAiCaptureFrame();
+                const audioBlob = await audioBlobPromise;
+
+                const formData = new FormData();
+                formData.append('image', targetImageBlob, 'capture.jpg');
+                formData.append('audio', audioBlob, 'voice.webm');
+
+                setStatus('processing', 'Thinking...');
+                const backendUrl = backendUrlInput.value.trim();
+                const backendResponse = await fetch(backendUrl, { method: 'POST', body: formData });
+
+                if (!backendResponse.ok) {
+                    const errData = await backendResponse.json().catch(() => ({}));
+                    throw new Error(errData.detail || "Backend Server Error.");
+                }
+
+                const rawTranscript = backendResponse.headers.get('X-Transcript');
+                const rawGptResponse = backendResponse.headers.get('X-GPT-Response');
+                if (rawTranscript && rawGptResponse) {
+                    addChatMessage('user', decodeURIComponent(rawTranscript));
+                    addChatMessage('ai', decodeURIComponent(rawGptResponse));
+                }
+
+                setStatus('speaking', 'Speaking...');
+                const responseAudioBlob = await backendResponse.blob();
+                const audioUrl = URL.createObjectURL(responseAudioBlob);
+                activeAudio = new Audio(audioUrl);
+                activeAudio.onended = () => setStatus('ready', 'Ready');
+                await activeAudio.play();
+
+            } catch (error) {
+                console.error(error);
+                loadingBubble.classList.add('hidden');
+                showError(error.message);
+            }
+        }
+
+        btn.addEventListener('mousedown', startInteraction);
+        btn.addEventListener('mouseup', stopAndProcess);
+        btn.addEventListener('mouseleave', stopAndProcess);
+        btn.addEventListener('touchstart', startInteraction);
+        btn.addEventListener('touchend', stopAndProcess);
+        btn.addEventListener('touchcancel', stopAndProcess);
+
+    </script>
+</body>
+</html>
